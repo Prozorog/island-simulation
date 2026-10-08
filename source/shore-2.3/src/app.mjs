@@ -5,7 +5,7 @@ import {terrain,shoreline,clamp} from './terrain.mjs';
 import {legacyHTML} from './legacy.mjs';
 const canvas=document.getElementById('view'),hud=document.getElementById('hud'),loading=document.getElementById('loading');
 let renderer,shore,device,stopped=false;
-const diagnostics={build:'webgpu-optics-test-2.2',stage:'starting',firstError:null,errorType:null,samples:null,compatibility:null,viewport:null};window.shoreDiagnostics=diagnostics;
+const diagnostics={build:'shore-2.3-stage1',stage:'starting',firstError:null,errorType:null,samples:null,compatibility:null,viewport:null};window.shoreDiagnostics=diagnostics;
 function graphicsFailure(error,type='graphics-error'){if(!diagnostics.firstError){diagnostics.firstError=String(error?.message||error||'Unknown graphics error');diagnostics.errorType=error?.constructor?.name||type;diagnostics.failureStage=diagnostics.stage;}fallback(type==='device-lost'?'WebGPU-устройство потеряно.':'Ошибка WebGPU. Точная причина сохранена ниже.');}
 
 function fallback(reason){if(stopped)return;stopped=true;diagnostics.samples=renderer?.samples??null;diagnostics.compatibility=renderer?.backend?.compatibilityMode??null;diagnostics.viewport=[canvas.width||0,canvas.height||0];try{renderer?.setAnimationLoop(null);renderer?.dispose();device?.destroy();}catch(error){console.warn(error);}loading.hidden=true;document.getElementById('menu').hidden=true;document.getElementById('stick').style.display='none';document.getElementById('jump').style.display='none';canvas.hidden=true;const frame=document.getElementById('legacy');frame.srcdoc=legacyHTML;frame.style.display='block';const message=document.getElementById('fallback');message.hidden=false;message.textContent='Открыта совместимая версия V9 · WebGL2. '+reason;hud.hidden=true;window.shoreBackend={backend:'webgl2-fallback',reason};const details=document.getElementById('graphicsDetails');if(diagnostics.firstError){details.hidden=false;document.getElementById('graphicsError').textContent=diagnostics.build+' · этап: '+diagnostics.failureStage+'\n'+diagnostics.errorType+': '+diagnostics.firstError;document.getElementById('copyDiagnostics').onclick=()=>navigator.clipboard?.writeText(JSON.stringify(diagnostics,null,2)).catch(console.warn);}}
@@ -40,7 +40,7 @@ async function boot(){
   if(stopped)return;const now=performance.now(),raw=(now-last)/1000;last=now;const dt=Math.min(.033,Math.max(0,raw));if(document.hidden)return;
   if(!paused){const forward=(Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown')))+touch.y,right=(Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft')))+touch.x;controller.step(dt,{forward,right,jump,run:keys.has('ShiftLeft')||keys.has('ShiftRight')});jump=false;}
 
-  shore.updateCamera();shore.syncCamera(canvas.height);shore.render();fps=fps*.96+Math.min(240,1/Math.max(raw,.001))*.04;elapsed+=dt;if(elapsed>.3){elapsed=0;hud.textContent=`Оптика 2.2 · тест · Альфред · WebGPU · ${paused?'пауза':Math.round(fps)+' fps'}\nWASD / стрелки — идти · пробел — прыжок\nМышь — камера · F — следовать · R — сброс`;}
+  shore.updateCamera();shore.syncCamera(canvas.height);shore.render();fps=fps*.96+Math.min(240,1/Math.max(raw,.001))*.04;elapsed+=dt;if(elapsed>.3){elapsed=0;hud.textContent=`Shore 2.3 · SWE · Альфред · WebGPU · ${paused?'пауза':Math.round(fps)+' fps'}\nWASD / стрелки — идти · пробел — прыжок\nМышь — камера · F — следовать · R — сброс`;}
  });
 }
 boot().catch(e=>{console.error(e);graphicsFailure(e,'startup-error');});

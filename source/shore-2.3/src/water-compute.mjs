@@ -3,7 +3,7 @@ import {Fn,instanceIndex,instancedArray,uniform,uint,int,max,min,vec2,wgslFn,vec
 import {terrain} from './terrain.mjs';
 import {breakingSignal} from './breaking-signal.mjs';
 import {wavePackets,packetKx,sampleSeed,incomingWaves} from './incoming-waves.mjs';
-export async function createWaterCompute(renderer,{resolution=256,quiet=false,diagnostics=false,batchSubsteps=true}={}){
+export async function createWaterCompute(renderer,{resolution=256,quiet=false,diagnostics=false,batchSubsteps=true,edgeAbsorption=true}={}){
  await renderer.init();
  const n=resolution,count=n*n,dx=32/n,bedArray=new Float32Array(count*4),initial=new Float32Array(count*4);
  for(let z=0;z<n;z++)for(let x=0;x<n;x++){const p=[(x+.5)*dx-16,(z+.5)*dx-16];bedArray.set(terrain(...p),(z*n+x)*4);}
@@ -19,10 +19,10 @@ export async function createWaterCompute(renderer,{resolution=256,quiet=false,di
  const packedInitial=new Float32Array(count*8);packedInitial.set(initial);packedInitial.set(foamInitial,count*4);
  const a=instancedArray(packedInitial.slice(),'vec4'),b=instancedArray(packedInitial.slice(),'vec4');
  const historyOf=node=>({element:index=>node.element(index.add(count))});const foamA=historyOf(a),foamB=historyOf(b);
- const initialWet=Float32Array.from({length:count},(_,i)=>initial[i*4]>.004?1:0),wet=instancedArray(initialWet,'float');
+ const initialWet=new Float32Array(count*2);for(let i=0;i<count;i++)initialWet[i*2]=initial[i*4]>.004?1:0;const wet=instancedArray(initialWet,'vec2'),surface=instancedArray(new Float32Array(count*8),'vec4');
  const audit=diagnostics?instancedArray(new Float32Array(count*4),'vec4'):null;
  const maxStep=Math.min(.004,.5*dx/(7+2*Math.sqrt(9.81*8)));
- const time=uniform(0),forcing=uniform(quiet?0:1),body=uniform(new THREE.Vector4(1000,1000,0,.32)),bodyMotion=uniform(new THREE.Vector4(0,0,0,0));
+ const time=uniform(0),forcing=uniform(quiet?0:1),body=uniform(new THREE.Vector4(1000,1000,0,.32)),bodyMotion=uniform(new THREE.Vector4(0,0,0,0)),landing=uniform(new THREE.Vector4(1000,1000,0,.32)),impulse=uniform(0),absorb=uniform(edgeAbsorption?1:0),frameDt=uniform(1/60),surfaceRate=instancedArray(new Float32Array(count),'float'),waveHeight=uniform(.42),wavePeriod=uniform(5.0);let pendingImpact=0;
  const flux=wgslFn(`fn shoreFlux(l:vec3<f32>,r:vec3<f32>,bl:f32,br:f32,axis:u32,side:u32)->vec3<f32>{
  let vl=l.yz*min(1.0,3.5/max(length(l.yz),.0001));let vr=r.yz*min(1.0,3.5/max(length(r.yz),.0001));let bm=max(bl,br);
  let hl=max(l.x-bm,0.0);let hr=max(r.x-bm,0.0);let ul=select(vl.x,vl.y,axis==1u);let ur=select(vr.x,vr.y,axis==1u);
@@ -33,11 +33,13 @@ export async function createWaterCompute(renderer,{resolution=256,quiet=false,di
  let original=select(max(l.x-bl,0.0),max(r.x-br,0.0),side==1u);let clipped=select(hl,hr,side==1u);let correction=4.905*(original*original-clipped*clipped);
  if(axis==0u){f.y+=correction;}else{f.z+=correction;}return f;
 }`);
- const finish=wgslFn(`fn shoreUpdate(s:vec4<f32>,change:vec3<f32>,ground:f32,p:vec2<f32>,dt:f32,t:f32,body:vec4<f32>,motion:vec4<f32>,crest:f32,forcing:f32)->vec4<f32>{
+ const finish=wgslFn(`fn shoreUpdate(s:vec4<f32>,change:vec3<f32>,ground:f32,p:vec2<f32>,dt:f32,t:f32,body:vec4<f32>,motion:vec4<f32>,crest:f32,forcing:f32,landing:vec4<f32>,impact:f32,absorb:f32,waveHeight:f32,wavePeriod:f32)->vec4<f32>{
  var u=s.xyz+change;u.x=max(u.x,0.0);if(u.x<0.003){return vec4<f32>(u.x,0.0,0.0,s.w*exp(-dt*2.0));}
  let speed=length(u.yz)/max(u.x,0.005);u=vec3<f32>(u.x,u.yz*min(1.0,3.5/max(speed,0.0001))*exp(-dt*(0.018+0.06/max(u.x,0.05))));
- if(forcing>.5 && p.x < -14.7){let depth=max(-ground,.25);let wave=shoreIncoming(p,t,depth);let desired=max(depth+wave.x,0.0);let gain=10.0*(1.0-smoothstep(-15.5,-14.7,p.x));let relax=1.0-exp(-dt*gain);u=mix(u,vec3<f32>(desired,wave.yz),relax);}
+ if(forcing>.5 && p.x < -14.7){let depth=max(-ground,.25);let wave=shoreIncoming(p,t,depth,waveHeight,wavePeriod);let desired=max(depth+wave.x,0.0);let gain=10.0*(1.0-smoothstep(-15.5,-14.7,p.x));let relax=1.0-exp(-dt*gain);u=mix(u,vec3<f32>(desired,wave.yz),relax);}
 
+ let side=smoothstep(13.3,15.8,abs(p.y))*absorb;let damp=1.0-exp(-dt*side*3.0);u=mix(u,vec3<f32>(max(-ground,0.0),0.0,0.0),damp);
+ let landDelta=p-landing.xy;let landR=max(length(landDelta),.001);let ring=exp(-dot(landDelta,landDelta)/max(landing.w*landing.w*4.0,.02));u=vec3<f32>(u.x,u.yz+u.x*impact*.62*ring*landDelta/landR);
  let delta=p-body.xy;let r=length(delta);let radius=max(body.w,.1);let contact=exp(-dot(delta,delta)/(radius*radius*.70));let immersion=clamp(motion.z,0.0,1.0);
  let relative=motion.xy-u.yz/u.x;let drag=1.0-exp(-6.0*dt*immersion*contact);u=vec3<f32>(u.x,mix(u.yz,motion.xy*u.x,drag));
  let push=exp(-pow((r-radius)/.17,2.0))*clamp(body.z+motion.w,0.0,2.0);u=vec3<f32>(u.x,u.yz+delta/max(r,.001)*push*dt*.13);
@@ -65,20 +67,21 @@ export async function createWaterCompute(renderer,{resolution=256,quiet=false,di
   if(audit){const old=audit.element(i),raw=s.x.add(change.x);audit.element(i).assign(vec4(min(old.x,raw),old.y.add(max(raw.negate(),0).mul(dx*dx)),max(old.z,s.x),max(old.w,length(velocity))));}
   const transported=s.w.sub(dt.div(dx).mul(max(velocity.x,0).mul(s.w.sub(l.w)).add(min(velocity.x,0).mul(r.w.sub(s.w))).add(max(velocity.y,0).mul(s.w.sub(d.w))).add(min(velocity.y,0).mul(u.w.sub(s.w)))));
   const crest=breakingSignal(pc,pl,pr,pd,pu,vec4(l.x,r.x,d.x,u.x),s.x,float(dx));
-  const next=finish(vec4(s.xyz,transported.max(0)),change,bc,vec2(x,z).add(.5).mul(dx).sub(16),dt,time,body,bodyMotion,crest,forcing).toVar();
+  const next=finish(vec4(s.xyz,transported.max(0)),change,bc,vec2(x,z).add(.5).mul(dx).sub(16),dt,time,body,bodyMotion,crest,forcing,landing,impulse,absorb,waveHeight,wavePeriod).toVar();
   const back=vec2(x,z).sub(velocity.mul(dt.div(dx))).clamp(0,n-1),base=back.floor().min(n-2),fraction=back.sub(base);
   const foamAt=(ox,oz)=>foamRead.element(uint(base.y.add(oz).mul(n).add(base.x.add(ox))));
   const history=mix(mix(foamAt(0,0),foamAt(1,0),fraction.x),mix(foamAt(0,1),foamAt(1,1),fraction.x),fraction.y);
   const born=next.w.sub(transported.max(0).mul(dt.mul(-.55).exp())).max(0).div(next.w.max(.001)).clamp(0,1);
   const world=vec2(x,z).add(.5).mul(dx).sub(16),alive=next.w.greaterThan(.006).and(next.x.greaterThan(.008));
   foamWrite.element(i).assign(select(alive,vec4(mix(history.xy,world,born),history.z.add(dt).mul(float(1).sub(born)).min(20),next.w),vec4(world,0,0)));
-  write.element(i).assign(next);wet.element(i).assign(max(wet.element(i).mul(dt.div(-19).exp()),smoothstep(.002,.018,next.x)));
+  write.element(i).assign(next);wet.element(i).assign(vec2(max(wet.element(i).x.mul(dt.div(-19).exp()),smoothstep(.002,.018,next.x)),crest));
  })().compute(count,[64]);}
- const slots=Array.from({length:16},(_,i)=>{const dt=uniform(maxStep),time=uniform(0);return {dt,time,node:kernel(i%2?b:a,i%2?a:b,i%2?foamB:foamA,i%2?foamA:foamB,dt,time)};}),dispatches=[];let parity=0,clock=0;
- await renderer.compileComputeAsync(slots.map(slot=>slot.node));
+ const snapshot=read=>Fn(()=>{const i=instanceIndex,s=read.element(i),old=surface.element(i);surfaceRate.element(i).assign(s.x.sub(old.x).div(max(frameDt,.0001)));surface.element(i).assign(s);surface.element(i.add(count)).assign(vec4(read.element(i.add(count)).xyz,s.x.add(bed.element(i).x)));})().compute(count,[64]);const snapshots=[snapshot(a),snapshot(b)];
+ const slots=Array.from({length:2},(_,i)=>{const dt=uniform(maxStep),time=uniform(0);return {dt,time,node:kernel(i%2?b:a,i%2?a:b,i%2?foamB:foamA,i%2?foamA:foamB,dt,time)};}),dispatches=[];let parity=0,clock=0;
+ console.log('SWE: compiling two kernels');await renderer.compileComputeAsync(slots.map(slot=>slot.node));console.log('SWE: ready');
  function floorAt(x,z){const px=Math.max(0,Math.min(n-1,(x+16)/dx-.5)),pz=Math.max(0,Math.min(n-1,(z+16)/dx-.5)),ix=Math.min(n-2,Math.floor(px)),iz=Math.min(n-2,Math.floor(pz)),u=px-ix,v=pz-iz,at=(a,b)=>bedArray[(b*n+a)*4];return u+v<=1?at(ix,iz)*(1-u-v)+at(ix+1,iz)*u+at(ix,iz+1)*v:at(ix+1,iz+1)*(u+v-1)+at(ix+1,iz)*(1-v)+at(ix,iz+1)*(1-u);}
- const samplePoint=uniform(new THREE.Vector2()),sampleOutput=instancedArray(new Float32Array(4),'vec4');
- const makeSample=read=>Fn(()=>{const x=uint(samplePoint.x.add(16).div(dx).floor().clamp(0,n-1)),z=uint(samplePoint.y.add(16).div(dx).floor().clamp(0,n-1)),i=z.mul(n).add(x),s=read.element(i);sampleOutput.element(uint(0)).assign(vec4(s.x.add(bed.element(i).x),s.x,s.yz.div(max(s.x,.005))));})().compute(1);
+ const samplePoint=uniform(new THREE.Vector2()),sampleOutput=instancedArray(new Float32Array(8),'vec4');
+ const makeSample=read=>Fn(()=>{const x=uint(samplePoint.x.add(16).div(dx).floor().clamp(0,n-1)),z=uint(samplePoint.y.add(16).div(dx).floor().clamp(0,n-1)),i=z.mul(n).add(x),s=read.element(i);sampleOutput.element(uint(0)).assign(vec4(s.x.add(bed.element(i).x),s.x,s.yz.div(max(s.x,.005))));sampleOutput.element(uint(1)).assign(vec4(surfaceRate.element(i),0,0,0));})().compute(1);
  const sampleA=makeSample(a),sampleB=makeSample(b);
- return {n,dx,count,maxStep,forcing,async readAudit(){return audit?new Float32Array(await renderer.getArrayBufferAsync(audit.value)):null;},reset(){wet.value.array.set(initialWet);wet.value.needsUpdate=true;a.value.array.set(packedInitial);b.value.array.set(packedInitial);a.value.needsUpdate=true;b.value.needsUpdate=true;parity=0;clock=0;time.value=0;},async sample(x,z){samplePoint.value.set(x,z);renderer.compute(parity?sampleB:sampleA);return new Float32Array(await renderer.getArrayBufferAsync(sampleOutput.value));},bedArray,bed,wet,a,b,foamA,foamB,async readFoam(){return new Float32Array(await renderer.getArrayBufferAsync((parity?b:a).value)).slice(count*4);},body,bodyMotion,floorAt,time,get parity(){return parity},get current(){return parity?b:a},step(seconds){let left=seconds;if(!batchSubsteps){while(left>1e-7){const slot=slots[parity];slot.dt.value=Math.min(maxStep,left);slot.time.value=clock;time.value=clock;renderer.compute(slot.node);parity=1-parity;clock+=slot.dt.value;left-=slot.dt.value;}return;}while(left>1e-7){dispatches.length=0;for(let j=0,start=parity;j<slots.length;j++){if(left<=1e-7)break;const slot=slots[(start+j)%slots.length];slot.dt.value=Math.min(maxStep,left);slot.time.value=clock;dispatches.push(slot.node);parity=1-parity;time.value=clock;clock+=slot.dt.value;left-=slot.dt.value;}renderer.compute(dispatches);}},async read(){return new Float32Array(await renderer.getArrayBufferAsync((parity?b:a).value)).slice(0,count*4);}};
+ const api={n,dx,count,maxStep,forcing,waveHeight,wavePeriod,elevation:i=>surface.element(i.add(count)).w,impact(event){landing.value.set(event.position.x,event.position.z,0,event.radius);pendingImpact=Math.min(2,event.relativeSpeed*.65);},async readAudit(){return audit?new Float32Array(await renderer.getArrayBufferAsync(audit.value)):null;},reset(){wet.value.array.set(initialWet);wet.value.needsUpdate=true;a.value.array.set(packedInitial);b.value.array.set(packedInitial);a.value.needsUpdate=true;b.value.needsUpdate=true;parity=0;clock=0;time.value=0;pendingImpact=0;renderer.compute(snapshots[0]);},async sample(x,z){samplePoint.value.set(x,z);renderer.compute(parity?sampleB:sampleA);return new Float32Array(await renderer.getArrayBufferAsync(sampleOutput.value));},bedArray,bed,wet,a:surface,b:surface,foamA:{element:i=>surface.element(i.add(count))},foamB:{element:i=>surface.element(i.add(count))},async readFoam(){return new Float32Array(await renderer.getArrayBufferAsync((parity?b:a).value)).slice(count*4);},body,bodyMotion,floorAt,time,get parity(){return 0},get current(){return parity?b:a},step(seconds){frameDt.value=Math.max(seconds,.0001);let left=Math.min(seconds,20);if(pendingImpact>0&&left>0){const slot=slots[parity];slot.dt.value=Math.min(maxStep,left);slot.time.value=clock;impulse.value=pendingImpact;renderer.compute(slot.node);parity=1-parity;clock+=slot.dt.value;left-=slot.dt.value;pendingImpact=0;impulse.value=0;}while(left>1e-7){dispatches.length=0;for(let j=0,start=parity;j<slots.length;j++){if(left<=1e-7)break;const slot=slots[(start+j)%slots.length];slot.dt.value=Math.min(maxStep,left);slot.time.value=clock;dispatches.push(slot.node);parity=1-parity;clock+=slot.dt.value;left-=slot.dt.value;}if(batchSubsteps)renderer.compute(dispatches);else for(const node of dispatches)renderer.compute(node);}time.value=clock;renderer.compute(snapshots[parity]);},async read(){return new Float32Array(await renderer.getArrayBufferAsync((parity?b:a).value)).slice(0,count*4);}};api.reset();return api;
 }

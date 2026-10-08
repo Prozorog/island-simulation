@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import {Fn,attribute,positionLocal,positionWorld,vertexIndex,uniform,select,vec2,vec3,vec4,uint,int,max,min,transformNormalToView,wgslFn,smoothstep,mix,float,shadow,pass,renderOutput,normalWorld,normalize,texture} from 'three/tsl';
 import {terrain,shoreline} from './terrain.mjs';
 import {surfaceRipples} from './surface-ripples.mjs';
-import {createLayeredCompute as createWaterCompute} from './layered-compute.mjs';
+import {createWaterCompute} from './water-compute.mjs';
 import {createSurfaceTexture} from './lookup-textures.mjs';
 import {createSkyEnvironment} from './sky.mjs';
 import {createWaterMaterial} from './water-material.mjs';
