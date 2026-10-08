@@ -1,0 +1,3 @@
+import assert from 'node:assert/strict';import {createFrameClock} from '../src/frame-clock.mjs';
+for(const fps of [20,29,30,34,60,120]){const clock=createFrameClock();let count=0;for(let i=0;i<fps*10;i++)count+=clock.tick(1/fps);assert.ok(Math.abs(count/60-10)<1e-8);assert.equal(clock.stats().droppedSeconds,0);}
+const clock=createFrameClock();assert.equal(clock.tick(3),4);assert.ok(clock.stats().remainder<1/60);assert.ok(clock.stats().droppedSeconds>2.9);assert.equal(clock.tick(1/60),1);clock.reset();assert.equal(clock.tick(0),0);assert.equal(clock.tick(NaN),0);console.log('frame-clock:20/29/30/34/60/120fps,3s stall,resume,reset PASS');

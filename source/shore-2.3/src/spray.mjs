@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import {attribute, float, select, smoothstep, uniform, uv, vec2, vec3} from 'three/tsl';
+import {attribute, float, select, smoothstep, uniform, uv, vec2, vec3,vec4,cameraViewMatrix,mx_atan2,mix,pow,dot,max,normalize} from 'three/tsl';
 
 export const MAX_SPRAY_PARTICLES = 160;
 const GRAVITY = 9.81;
@@ -10,7 +10,7 @@ const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
  * ballistic position, finite lifetime and fade are evaluated on the GPU.
  * update(time) must use the same simulation clock as the landing event.
  */
-export function createSpray(scene, {capacity = MAX_SPRAY_PARTICLES} = {}) {
+export function createSpray(scene, {capacity = MAX_SPRAY_PARTICLES,onReturn=()=>{},floorAt=()=>-100,getMotion=()=>({x:0,y:0})} = {}) {
   capacity = Number.isFinite(capacity) ? clamp(Math.floor(capacity), 1, MAX_SPRAY_PARTICLES) : MAX_SPRAY_PARTICLES;
   const starts = new Float32Array(capacity * 4);
   const motions = new Float32Array(capacity * 4);
@@ -43,11 +43,11 @@ export function createSpray(scene, {capacity = MAX_SPRAY_PARTICLES} = {}) {
     alphaTest: .008,
   });
   material.positionNode = start.xyz.add(motion.xyz.mul(t)).add(vec3(0, t.mul(t).mul(-GRAVITY * .5), 0));
-  material.scaleNode = vec2(size).mul(select(alive, float(1), float(0)));
-  material.colorNode = vec3(.82, .93, 1);
+  const velocity=motion.xyz.add(vec3(0,t.mul(-GRAVITY),0)),screenVelocity=cameraViewMatrix.mul(vec4(velocity,0)).xy;material.rotationNode=mx_atan2(screenVelocity.y,screenVelocity.x).sub(Math.PI/2);material.scaleNode = vec2(size.mul(.65),size.mul(velocity.length().mul(.18).add(1).min(1.8))).mul(select(alive, float(1), float(0)));
+  const q=uv().sub(.5).mul(2),nz=float(1).sub(q.dot(q)).max(0).sqrt(),n=vec3(q,nz),light=normalize(cameraViewMatrix.mul(vec4(-.48,.84,-.42,0)).xyz),glint=pow(max(dot(n,normalize(light.add(vec3(0,0,1)))),0),24),edge=pow(float(1).sub(nz),3);material.colorNode = mix(vec3(.10,.27,.30),vec3(.86,.96,1),edge.mul(.55).add(glint).clamp(0,1));
   const disk = float(1).sub(smoothstep(.22, .5, uv().sub(.5).length()));
   material.opacityNode = disk.mul(float(1).sub(smoothstep(.45, 1, progress)))
-    .mul(select(alive, float(.86), float(0)));
+    .mul(select(alive, edge.mul(.4).add(.45), float(0)));
   const mesh = new THREE.Mesh(geometry, material);
   mesh.name = 'Landing spray';
   mesh.frustumCulled = false;
@@ -77,7 +77,7 @@ export function createSpray(scene, {capacity = MAX_SPRAY_PARTICLES} = {}) {
     const impact = clamp(event.impact, 0, 1);
     const radius = clamp(Number.isFinite(event.radius) ? event.radius : .32, .05, 2);
     const birth = Number.isFinite(event.time) ? event.time : now.value;
-    const count = Math.min(capacity, Math.ceil(12 + impact * 48));
+    const count = Math.min(capacity, Math.ceil(10 + impact * 32));
     randomState = ((Math.floor(birth * 10000) ^ Math.imul(bursts + 1, 2654435761)) >>> 0) || 1;
     for (let i = 0; i < count; i++) {
       const slot = cursor, offset = slot * 4;
@@ -89,16 +89,16 @@ export function createSpray(scene, {capacity = MAX_SPRAY_PARTICLES} = {}) {
       const horizontalSpeed = (.4 + impact * 1.7) * (.5 + random() * .7);
       const verticalSpeed = (.7 + impact * 2.5) * (.65 + random() * .6);
       // End just before the ballistic trajectory returns to its launch height.
-      const lifetime = Math.min(1.1, verticalSpeed * 2 / GRAVITY * (.85 + random() * .13));
+      const lifetime = Math.min(1.2,(verticalSpeed+Math.sqrt(verticalSpeed*verticalSpeed+2*GRAVITY*.025))/GRAVITY);
       starts[offset] = position.x + dx * launchRadius;
       starts[offset + 1] = position.y + .025;
       starts[offset + 2] = position.z + dz * launchRadius;
       starts[offset + 3] = birth;
-      motions[offset] = dx * horizontalSpeed;
+      motions[offset] = dx * horizontalSpeed+getMotion().x*.18;
       motions[offset + 1] = verticalSpeed;
-      motions[offset + 2] = dz * horizontalSpeed;
+      motions[offset + 2] = dz * horizontalSpeed+getMotion().y*.18;
       motions[offset + 3] = lifetime;
-      sizes[slot] = (.025 + impact * .032) * (.65 + random() * .65);
+      sizes[slot] = (.009 + impact * .016) * (.65 + random() * .65);
       expires[slot] = birth + lifetime;
       latestExpiry = Math.max(latestExpiry, expires[slot]);
     }
@@ -124,6 +124,7 @@ export function createSpray(scene, {capacity = MAX_SPRAY_PARTICLES} = {}) {
   function update(time) {
     if (disposed || !Number.isFinite(time)) return;
     if (time < now.value) reset(time);
+    const previous=now.value;let returned=0;for(let i=0;i<capacity;i++){if(expires[i]>previous&&expires[i]<=time&&motions[i*4+3]>0){const k=i*4,t=motions[k+3],x=starts[k]+motions[k]*t,z=starts[k+2]+motions[k+2]*t,y=starts[k+1]-.025;if(floorAt(x,z)<y-.008&&returned++<2)onReturn({time,position:{x,y,z},radius:.07,impact:.045,relativeSpeed:.3,secondary:true});}}
     now.value = time;
     mesh.visible = emitted > 0 && latestExpiry > time;
   }

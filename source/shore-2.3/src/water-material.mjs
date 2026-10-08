@@ -15,7 +15,7 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt,environment){
  const breaker=Fn(()=>{const grid=positionWorld.xz.add(16).div(dx).sub(.5).clamp(0,n-1),base=grid.floor(),f=grid.sub(base);const weights=t=>[float(1).sub(t).pow(3).div(6),t.pow(3).mul(3).sub(t.pow(2).mul(6)).add(4).div(6),t.pow(3).mul(-3).add(t.pow(2).mul(3)).add(t.mul(3)).add(1).div(6),t.pow(3).div(6)],wx=weights(f.x),wz=weights(f.y),sum=float(0).toVar();for(let z=0;z<4;z++)for(let x=0;x<4;x++){const ix=base.x.add(x-1).clamp(0,n-1),iz=base.y.add(z-1).clamp(0,n-1);sum.addAssign(sim.wet.element(uint(iz.mul(n).add(ix))).y.mul(wx[x]).mul(wz[z]));}return sum;})();
  const bodyDelta=positionWorld.xz.sub(sim.body.xy),bodyDistance=length(bodyDelta),bodyRadius=sim.body.w.max(.1);
  const turbulence=smoothstep(.06,.52,breaker).mul(smoothstep(bodyRadius.mul(.8),bodyRadius.mul(2.7),bodyDistance));
- const material=new THREE.MeshBasicNodeMaterial({transparent:true,side:THREE.DoubleSide,depthWrite:true});material.forceSinglePass=true;
+ const material=new THREE.MeshBasicNodeMaterial({transparent:true,side:THREE.DoubleSide,depthWrite:true});material.forceSinglePass=true;material.maskNode=wetDepth.greaterThan(.0015);
  material.positionNode=vec3(positionLocal.x,surface.x.add(.002),positionLocal.z);
  const macro=vec3(surface.y.negate(),1,surface.z.negate()).toVertexStage();
  const foamTexture=texture(createFoamTexture()),p=positionWorld.xz,flowDetail=center.yz.div(max(center.x,.02)).toVertexStage();

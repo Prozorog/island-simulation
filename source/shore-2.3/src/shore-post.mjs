@@ -4,7 +4,7 @@ import {fxaa} from 'three/addons/tsl/display/FXAANode.js';
 import {dof} from 'three/addons/tsl/display/DepthOfFieldNode.js';
 import {bloom} from 'three/addons/tsl/display/BloomNode.js';
 export function createShorePost(renderer,scene,camera,water,player){
- const scenePass=pass(scene,camera),focus=uniform(8),focalLength=uniform(4.5),bokeh=uniform(.55);
+ const scenePass=pass(scene,camera),focus=uniform(8),focalLength=uniform(7),bokeh=uniform(.25);
  scenePass.setMRT(mrt({output,waterBloom:vec4(0)}));water.material.mrtNode=mrt({waterBloom:water.material.userData.shoreBloom});
  const image=scenePass.getTextureNode(),depth=scenePass.getViewZNode(),blurred=dof(image,depth,focus,focalLength,bokeh),glow=bloom(scenePass.getTextureNode('waterBloom'),.12,.2,.65);
  const pipeline=new THREE.RenderPipeline(renderer);pipeline.outputColorTransform=false;

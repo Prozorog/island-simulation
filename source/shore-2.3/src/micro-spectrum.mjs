@@ -16,5 +16,5 @@ export function createMicroSpectrum(renderer,sim){
 }`);
  const textures=tiles.map(({size})=>{const t=new THREE.StorageTexture(size,size);t.type=THREE.HalfFloatType;t.generateMipmaps=true;t.minFilter=THREE.LinearMipmapLinearFilter;t.wrapS=t.wrapT=THREE.RepeatWrapping;return t;});
  const nodes=tiles.map((tile,j)=>Fn(()=>{const g=uvec2(instanceIndex.mod(tile.size),instanceIndex.div(tile.size)),p=vec2(g).add(.5).div(tile.size).mul(tile.metres);textureStore(textures[j],g,wave(p,sim.time,tile.metres,tile.share,wind)).toWriteOnly();})().compute(tile.size*tile.size,[64]));
- return{wind,strength,tiles,textures:textures.map(t=>texture(t)),step(){renderer.compute(nodes)},dispose(){for(const t of textures)t.dispose();}};
+ let lastTime=-1,lastWind=-1;return{wind,strength,tiles,textures:textures.map(t=>texture(t)),step(){if(lastTime===sim.time.value&&lastWind===wind.value)return;lastTime=sim.time.value;lastWind=wind.value;renderer.compute(nodes)},dispose(){for(const t of textures)t.dispose();}};
 }

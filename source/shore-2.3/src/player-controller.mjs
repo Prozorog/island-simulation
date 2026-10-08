@@ -119,7 +119,7 @@ export function createPlayerController(shore) {
       const bottom = shore.player.position.y - profile.halfHeight;
       return {
         vy, water: {...water}, grounded, entry: 0, lastImmersion, heading,
-        profile, eyeClearance: bottom + profile.eyeHeight - water.eta,
+        profile, immersionFraction:ellipsoidImmersion(lastImmersion), eyeClearance: bottom + profile.eyeHeight - water.eta,
         eyeTopClearance: bottom + profile.eyeTopHeight - water.eta,
         bodyMotion: shore.sim.bodyMotion.value.toArray(),
         landing: landingEvents.stats(), spray: shore.spray?.stats(),

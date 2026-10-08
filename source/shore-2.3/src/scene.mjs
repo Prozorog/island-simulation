@@ -13,6 +13,7 @@ import {createWaterMaterial} from './water-material.mjs';
 import {createWaterCaustics} from './water-caustics.mjs';
 import {createGrass} from './grass.mjs';
 import {createSandTracks} from './sand-tracks.mjs';
+import {createSplashCrowns} from './splash-crown.mjs';
 import {createSpray} from './spray.mjs';
 import {createAlfredVisual} from './alfred.mjs';
 import {ALFRED_BODY_PROFILE,bodyFloorAt} from './body-profile.mjs';
@@ -26,7 +27,7 @@ export async function createShoreScene(renderer,{resolution=256}={}){
  const shadowMask=shadow(sun).mul(shadow(bakedSun));sun.shadow.shadowNode=shadowMask;
  scene.add(new THREE.HemisphereLight(0xd5e5f1,0x756641,1.0));
  renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
- const sim=await createWaterCompute(renderer,{resolution});sim.localRipples=createLocalRipples(renderer,sim,{resolution:mobile?256:512});sim.microSpectrum=createMicroSpectrum(renderer,sim);sim.microSpectrum.step();sim.foamField=createFoamField(renderer,sim,{resolution:mobile?512:1024});const resetSim=sim.reset;sim.reset=()=>{resetSim();sim.foamField.reset();sim.localRipples.reset();};sim.visualGround=uniform(0);sim.visualBody=uniform(new THREE.Vector4(0,0,0,.95));const caustics=createWaterCaustics(renderer,sim),causticTexture=texture(caustics.texture);
+ const sim=await createWaterCompute(renderer,{resolution});sim.localRipples=createLocalRipples(renderer,sim,{resolution:mobile?256:512,extent:mobile?4:8});sim.microSpectrum=createMicroSpectrum(renderer,sim);sim.microSpectrum.step();sim.foamField=createFoamField(renderer,sim,{resolution:mobile?512:1024});const resetSim=sim.reset;sim.reset=()=>{resetSim();sim.foamField.reset();sim.localRipples.reset();};sim.visualGround=uniform(0);sim.visualBody=uniform(new THREE.Vector4(0,0,0,.95));const caustics=createWaterCaustics(renderer,sim),causticTexture=texture(caustics.texture);
  const terrainGeom=new THREE.PlaneGeometry(32-sim.dx,32-sim.dx,sim.n-1,sim.n-1);terrainGeom.rotateX(-Math.PI/2);const pos=terrainGeom.attributes.position,biome=new Float32Array(pos.count*4);
  for(let i=0;i<pos.count;i++){const b=sim.bedArray.subarray(i*4,i*4+4),x=i%sim.n,z=Math.floor(i/sim.n);if(x===0||x===sim.n-1)pos.setX(i,x===0?-16:16);if(z===0||z===sim.n-1)pos.setZ(i,z===0?-16:16);pos.setY(i,b[0]);biome.set(b,i*4);}pos.needsUpdate=true;terrainGeom.setAttribute('biome',new THREE.BufferAttribute(biome,4));terrainGeom.setAttribute('groundRefined',new THREE.BufferAttribute(new Float32Array(pos.count),1));terrainGeom.computeVertexNormals();
  const surfaceColor=wgslFn(`fn shoreSurface(p:vec3<f32>,b:vec4<f32>,detail:vec4<f32>,wet:f32)->vec3<f32>{
@@ -72,7 +73,7 @@ export async function createShoreScene(renderer,{resolution=256}={}){
   const receiverShadow=shadowMask.context({shadowPositionWorld:point});
   const ambient=mix(vec3(.178,.133,.053),vec3(.665,.784,.88),n.y.mul(.5).add(.5)).mul(1/Math.PI).add(vec3(.10,.14,.17));
   const direct=vec3(1,.888,.687).mul(3/Math.PI).mul(n.dot(vec3(-.48,.84,-.42).normalize()).max(0)).mul(receiverShadow.rgb);
-  const caustic=causticTexture.sample(vec2(point.x.add(16).div(32),float(16).sub(point.z).div(32))).r;const focus=select(caustic.greaterThan(.02),caustic,float(1));
+  const caustic=causticTexture.sample(vec2(point.x.add(16).div(32),float(16).sub(point.z).div(32))).rg;const focus=select(caustic.y.greaterThan(.002),caustic.x.div(caustic.y.min(1).max(.002)).clamp(.5,2.5),float(1));
   const depth=max(sim.elevation(uint(point.z.add(16).div(sim.dx).floor().clamp(0,sim.n-1).mul(sim.n).add(point.x.add(16).div(sim.dx).floor().clamp(0,sim.n-1)))).sub(point.y),0);return albedo.mul(ambient.add(direct.mul(mix(float(1),focus,depth.mul(-.35).exp().mul(causticStrength).mul(wet)))));
  };
  const {material:waterMat,mirror,active,foamAmount,detailScale,absorption,inscatter}=createWaterMaterial(sim,sun,shadowMask,receiverAt,scene.environment);
@@ -85,7 +86,7 @@ export async function createShoreScene(renderer,{resolution=256}={}){
  const waterWall=new THREE.Mesh(wallGeometry,wallMaterial);waterWall.frustumCulled=false;waterWall.renderOrder=3;scene.add(waterWall);
  const water=new THREE.Mesh(waterGeom,waterMat);water.renderOrder=2;water.receiveShadow=true;water.frustumCulled=false;if(mirror)water.add(mirror.target);scene.add(water);
  const player=new THREE.Group();player.name='Alfred physics body';const alfred=await createAlfredVisual();alfred.position.y=-ALFRED_BODY_PROFILE.halfHeight;player.add(alfred);player.position.set(shoreline(-2)+1.8,terrain(shoreline(-2)+1.8,-2)[0]+ALFRED_BODY_PROFILE.halfHeight,-2);player.layers.set(1);camera.layers.enable(1);scene.add(player);
- const spray=createSpray(scene);
+ const crowns=createSplashCrowns(scene,{aspect:ALFRED_BODY_PROFILE.radiusX/ALFRED_BODY_PROFILE.radiusZ,getHeading:()=>player.rotation.y}),spray=createSpray(scene,{getMotion:()=>sim.bodyMotion.value,floorAt:sim.floorAt,onReturn:event=>sim.localRipples.impact(event)});const resetSpray=spray.reset;spray.reset=time=>{resetSpray(time);crowns.reset();};
  const grass=createGrass(sim,shadowMask);scene.add(grass.group);grass.update(0,player.position,camera,640);
  const orbit={yaw:-.70,pitch:.62,radius:43,target:new THREE.Vector3(0,.6,0),follow:false};
  function updateCamera(){if(orbit.follow)orbit.target.copy(player.position).y-=.1;const horizontal=Math.cos(orbit.pitch)*orbit.radius;camera.position.set(orbit.target.x+Math.sin(orbit.yaw)*horizontal,orbit.target.y+Math.sin(orbit.pitch)*orbit.radius,orbit.target.z+Math.cos(orbit.yaw)*horizontal);camera.lookAt(orbit.target);}
@@ -93,5 +94,5 @@ export async function createShoreScene(renderer,{resolution=256}={}){
  setView('wide');
  const post=createShorePost(renderer,scene,camera,water,player);if(mobile)post.setEnabled(false);
 
- return {scene,camera,sim,player,water,grass,spray,caustics,onLanding(event){sim.impact(event);spray.emit(event);},orbit,foamAmount,tracks,detailScale,groundDetailScale,absorption,inscatter,causticStrength,post,render(){caustics.update();spray.update(sim.time.value);post.render()},updateCamera,setView,syncCamera(height=640){sim.visualGround.value=sim.floorAt(player.position.x,player.position.z);sim.visualBody.value.set(player.position.x,player.position.y,player.position.z,.95);sun.target.position.copy(player.position);sun.position.copy(player.position).addScaledVector(new THREE.Vector3(-.48,.84,-.42).normalize(),40);grass.update(sim.time.value,player.position,camera,height)},step(dt){sim.step(dt);sim.foamField.step(dt);sim.microSpectrum.step();sim.localRipples.step(dt);active.value=sim.parity}};
+ return {scene,camera,sim,player,water,grass,spray,crowns,caustics,onLanding(event){sim.impact(event);sim.foamField.impact(event);sim.localRipples.impact(event);spray.emit(event);crowns.emit(event);},orbit,foamAmount,tracks,detailScale,groundDetailScale,absorption,inscatter,causticStrength,post,render(){sim.microSpectrum.step();caustics.enabled.value=causticStrength.value;caustics.update();spray.update(sim.time.value);crowns.update(sim.time.value);post.render()},updateCamera,setView,syncCamera(height=640){sim.visualGround.value=sim.floorAt(player.position.x,player.position.z);sim.visualBody.value.set(player.position.x,player.position.y,player.position.z,.95);sun.target.position.copy(player.position);sun.position.copy(player.position).addScaledVector(new THREE.Vector3(-.48,.84,-.42).normalize(),40);grass.update(sim.time.value,player.position,camera,height)},step(dt){sim.step(dt);sim.foamField.step(dt);sim.localRipples.step(dt);active.value=sim.parity}};
 }
