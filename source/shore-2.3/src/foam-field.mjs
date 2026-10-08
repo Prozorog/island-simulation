@@ -37,7 +37,7 @@ export function createFoamField(renderer,sim,{resolution=1024}={}){
   textureStore(pair[1-k],uvec2(g),select(reset,vec4(w,0,0),vec4(old.xy,age,fade.mul(quality)))).toWriteOnly();
  })().compute(n*n,[64])));
  let parity=0;
- const choose=pair=>{const a=texture(pair[0]),b=texture(pair[1]);return uv=>select(active.equal(0),a.sample(uv),b.sample(uv));};
+ const displayDensity=texture(density[0]),displayCharts=charts.map(pair=>texture(pair[0]));const sync=()=>{displayDensity.value=density[parity];for(let j=0;j<2;j++)displayCharts[j].value=charts[j][parity];};
  renderer.compute(init);
- return {resolution:n,freshLife,residualLife,strength,chartLife,density:choose(density),charts:charts.map(choose),step(seconds){dt.value=Math.min(seconds,.033);renderer.compute([advect[parity],correct[parity],chartNodes[0][parity],chartNodes[1][parity]]);parity=1-parity;active.value=parity;},reset(){renderer.compute(init);parity=0;active.value=0;},dispose(){for(const t of [...density,predict,...charts.flat()])t.dispose();}};
+ return {resolution:n,freshLife,residualLife,strength,chartLife,density:uv=>displayDensity.sample(uv),charts:displayCharts.map(node=>uv=>node.sample(uv)),step(seconds){dt.value=Math.min(seconds,.033);renderer.compute([advect[parity],correct[parity],chartNodes[0][parity],chartNodes[1][parity]]);parity=1-parity;active.value=parity;sync();},reset(){renderer.compute(init);parity=0;active.value=0;sync();},dispose(){for(const t of [...density,predict,...charts.flat()])t.dispose();}};
 }

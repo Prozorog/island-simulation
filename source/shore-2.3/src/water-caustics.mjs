@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import {Fn,positionLocal,uint,vec2,vec3,vec4,float,min,max,abs,normalize,refract,dFdx,dFdy,smoothstep} from 'three/tsl';
 import {sampleBedInfo} from './water-rays.mjs';
 export function createWaterCaustics(renderer,sim){
- const size=256,segments=128,target=new THREE.RenderTarget(size,size,{type:THREE.HalfFloatType,depthBuffer:false,stencilBuffer:false,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});target.texture.name='Shared-surface caustic irradiance';
+ const size=512,segments=256,target=new THREE.RenderTarget(size,size,{type:THREE.HalfFloatType,depthBuffer:false,stencilBuffer:false,minFilter:THREE.LinearFilter,magFilter:THREE.LinearFilter});target.texture.name='Shared-surface caustic irradiance';
  const scene=new THREE.Scene(),camera=new THREE.OrthographicCamera(-16,16,16,-16,.1,60);camera.position.set(0,30,0);camera.up.set(0,0,-1);camera.lookAt(0,0,0);
  const geometry=new THREE.PlaneGeometry(32-sim.dx,32-sim.dx,segments,segments);geometry.rotateX(-Math.PI/2);
  const material=new THREE.MeshBasicNodeMaterial({side:THREE.DoubleSide,transparent:true,blending:THREE.AdditiveBlending,depthTest:false,depthWrite:false,toneMapped:false});

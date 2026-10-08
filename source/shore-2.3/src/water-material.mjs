@@ -1,24 +1,23 @@
 import * as THREE from 'three/webgpu';
+import {sampleState,cubicSurface} from './surface-sampling.mjs';
 import {environmentBRDF} from './environment-brdf.mjs';
 import {createWindTexture,createFoamTexture} from './lookup-textures.mjs';
 import {breakingSignal} from './breaking-signal.mjs';
 import {surfaceRipples} from './surface-ripples.mjs';
 import {heightfieldRayHit,bedRayHit,screenRayHit,projectWaterRay,waterDepthBuffer,waterSceneBuffer,sampleBedInfo,reflectedBedHit} from './water-rays.mjs';
-import {Fn,If,uniform,select,vertexIndex,positionLocal,positionWorld,cameraPosition,vec2,vec3,vec4,float,uint,int,max,min,smoothstep,mix,normalize,dot,pow,exp,screenUV,viewportSharedTexture,viewportSafeUV,viewportDepthTexture,perspectiveDepthToViewZ,cameraNear,cameraFar,positionView,refract,reflect,cameraProjectionMatrix,cameraViewMatrix,cameraProjectionMatrixInverse,getViewPosition,reflector,shadow,wgslFn,sin,texture,fract,abs,length,fwidth} from 'three/tsl';
-export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
+import {Fn,If,uniform,select,vertexIndex,positionLocal,positionWorld,cameraPosition,vec2,vec3,vec4,float,uint,int,max,min,smoothstep,mix,normalize,dot,pow,exp,screenUV,viewportSharedTexture,viewportSafeUV,viewportDepthTexture,perspectiveDepthToViewZ,cameraNear,cameraFar,positionView,refract,reflect,cameraProjectionMatrix,cameraViewMatrix,cameraProjectionMatrixInverse,getViewPosition,reflector,shadow,wgslFn,sin,texture,fract,abs,length,fwidth,pmremTexture} from 'three/tsl';
+export function createWaterMaterial(sim,sun,shadowMask,receiverAt,environment){
  const active=uniform(0),clock=sim.time,foamAmount=uniform(1),detailScale=uniform(1);
  const get=i=>select(active.equal(0),sim.a.element(i),sim.b.element(i));
  const n=sim.n,dx=sim.dx;
- const neighbors=()=>{const x=int(vertexIndex.mod(n)),z=int(vertexIndex.div(n));return [uint(z.mul(n).add(max(x.sub(1),0))),uint(z.mul(n).add(min(x.add(1),n-1))),uint(max(z.sub(1),0).mul(n).add(x)),uint(min(z.add(1),n-1).mul(n).add(x))]};
- const center=get(vertexIndex),centerBed=sim.bed.element(vertexIndex),foamCoverage=center.w.toVertexStage();
- const adjacent=neighbors(),adjacentStates=adjacent.map(get),primitive=(s,b)=>vec3(s.x.add(b),s.yz.div(max(s.x,.005)));
- const depthGradient=vec2(adjacentStates[1].x.sub(adjacentStates[0].x),adjacentStates[3].x.sub(adjacentStates[2].x)).div(dx*2),ripples=surfaceRipples(positionLocal.xz,clock,center.x,depthGradient).toVertexStage(),vertexWetDepth=max(center.x,0).toVertexStage(),wetDepth=max(positionWorld.y.sub(.002).sub(sampleBedInfo(sim,positionWorld.xz).data.x),0);
+ const center=sampleState(sim,positionLocal.xz),centerBed=sampleBedInfo(sim,positionLocal.xz).data,foamCoverage=center.w.toVertexStage(),surface=cubicSurface(sim,positionLocal.xz);
+ const vertexWetDepth=max(center.x,0).toVertexStage(),wetDepth=max(positionWorld.y.sub(.002).sub(sampleBedInfo(sim,positionWorld.xz).data.x),0);
  const breaker=Fn(()=>{const grid=positionWorld.xz.add(16).div(dx).sub(.5).clamp(0,n-1),base=grid.floor(),f=grid.sub(base);const weights=t=>[float(1).sub(t).pow(3).div(6),t.pow(3).mul(3).sub(t.pow(2).mul(6)).add(4).div(6),t.pow(3).mul(-3).add(t.pow(2).mul(3)).add(t.mul(3)).add(1).div(6),t.pow(3).div(6)],wx=weights(f.x),wz=weights(f.y),sum=float(0).toVar();for(let z=0;z<4;z++)for(let x=0;x<4;x++){const ix=base.x.add(x-1).clamp(0,n-1),iz=base.y.add(z-1).clamp(0,n-1);sum.addAssign(sim.wet.element(uint(iz.mul(n).add(ix))).y.mul(wx[x]).mul(wz[z]));}return sum;})();
  const bodyDelta=positionWorld.xz.sub(sim.body.xy),bodyDistance=length(bodyDelta),bodyRadius=sim.body.w.max(.1);
  const turbulence=smoothstep(.06,.52,breaker).mul(smoothstep(bodyRadius.mul(.8),bodyRadius.mul(2.7),bodyDistance));
- const material=new THREE.MeshBasicNodeMaterial({transparent:true,side:THREE.DoubleSide,depthWrite:true});
- material.positionNode=vec3(positionLocal.x,sim.elevation(vertexIndex).add(.002),positionLocal.z);
- const macro=Fn(()=>{const ns=neighbors(),e=i=>sim.elevation(i);return vec3(e(ns[0]).sub(e(ns[1])).div(dx*2),1,e(ns[2]).sub(e(ns[3])).div(dx*2));})().toVertexStage();
+ const material=new THREE.MeshBasicNodeMaterial({transparent:true,side:THREE.DoubleSide,depthWrite:true});material.forceSinglePass=true;
+ material.positionNode=vec3(positionLocal.x,surface.x.add(.002),positionLocal.z);
+ const macro=vec3(surface.y.negate(),1,surface.z.negate()).toVertexStage();
  const foamTexture=texture(createFoamTexture()),p=positionWorld.xz,flowDetail=center.yz.div(max(center.x,.02)).toVertexStage();
  const phase0=fract(clock.mul(.25)),phase1=fract(phase0.add(.5)),flowBlend=abs(phase0.mul(2).sub(1)),adv0=p.sub(flowDetail.mul(phase0.mul(4))),adv1=p.sub(flowDetail.mul(phase1.mul(4)));
  const rotate=q=>vec2(q.x.mul(.8).add(q.y.mul(.6)),q.x.mul(-.6).add(q.y.mul(.8)));
@@ -47,8 +46,8 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const fallbackReceiver=mix(validBedColor,directObjectColor,select(directBody,float(1),float(0))),refracted=vec4(mix(fallbackReceiver,waterSceneBuffer.sample(objectUV).rgb,objectConfidence),1);
  const fallbackPath=select(directBody,length(opaqueView.sub(positionView)),validBedPath),opticalPath=mix(fallbackPath,refractHit.z,objectConfidence).clamp(0,10);
  const contactThickness=max(positionView.z.sub(behindZ),0).mul(max(view.y,.1));
- const transmittance=exp(vec3(-1.15,-.62,-.43).mul(opticalPath));
- const transmitted=refracted.rgb.mul(transmittance).add(vec3(.011,.036,.055).mul(vec3(1).sub(transmittance)));
+ const absorption=uniform(new THREE.Vector3(.45,.09,.06)),inscatter=uniform(new THREE.Vector3(.05,.16,.20));const transmittance=exp(absorption.negate().mul(opticalPath));
+ const transmitted=refracted.rgb.mul(transmittance).add(inscatter.mul(vec3(1).sub(transmittance)));
  const sunDirection=uniform(new THREE.Vector3(-.48,.84,-.42).normalize()),halfway=normalize(view.add(sunDirection));
  const sunBRDF=wgslFn(`fn shoreSun(nv:f32,nl:f32,nh:f32,vh:f32,roughness:f32)->f32{
  let alpha=roughness*roughness;let a2=alpha*alpha;let d=nh*nh*(a2-1.0)+1.0;
@@ -60,7 +59,6 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const highlight=sunBRDF(max(dot(normal,view),.001),max(dot(normal,sunDirection),.001),max(dot(normal,halfway),0),max(dot(view,halfway),0),waterRoughness).mul(3.0);
  const shade=shadowMask.rgb;
  const flow=center.yz.div(max(center.x,.02)).toVertexStage();
- const history=select(active.equal(0),sim.foamA.element(vertexIndex),sim.foamB.element(vertexIndex)).toVertexStage();
  const foamUV=positionWorld.xz.add(16).div(32),density=sim.foamField.density(foamUV),chartA=sim.foamField.charts[0](foamUV),chartB=sim.foamField.charts[1](foamUV);
  const sumWeights=chartA.w.add(chartB.w).max(.001),blend=chartB.w.div(sumWeights),pattern0=foamTexture.sample(chartA.xy.mul(.34)),pattern1=foamTexture.sample(chartB.xy.mul(.34));
  const cellular=(pattern,amount)=>{const value=pattern.r.mul(.76).add(pattern.g.mul(.24)),threshold=float(1.02).sub(amount.sqrt().mul(1.2)),aa=max(fwidth(value),.015);return smoothstep(threshold.sub(aa),threshold.add(aa),value);};
@@ -68,7 +66,7 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const aged=mix(cellular(pattern0,coverage),cellular(pattern1,coverage),blend),dense=mix(cellular(pattern0,fresh),cellular(pattern1,fresh),blend),foamMask=max(aged,dense);
  const blurryFresh=density.x.add(sim.foamField.density(foamUV.add(vec2(.002,0))).x).add(sim.foamField.density(foamUV.sub(vec2(.002,0))).x).add(sim.foamField.density(foamUV.add(vec2(0,.002))).x).add(sim.foamField.density(foamUV.sub(vec2(0,.002))).x).mul(.2);
  const whitewater=foamMask.mul(foamAmount).mul(smoothstep(.008,.045,wetDepth)).mul(float(1).sub(smoothstep(.10,.55,centerBed.z.toVertexStage()).mul(float(1).sub(smoothstep(.12,.35,wetDepth))))).clamp(0,.98);
- const reflectedDirection=reflect(view.negate(),normal),skyHeight=reflectedDirection.y.clamp(0,1),skyReflection=vec3(.43,.56,.66).sub(vec3(.25,.28,.26).mul(skyHeight)).mul(.55);
+ const reflectedDirection=reflect(view.negate(),normal),skyReflection=pmremTexture(environment,reflectedDirection,waterRoughness).rgb;
  const terrainReflection=reflectedBedHit(sim,positionWorld,reflectedDirection).toVar(),reflectPoint=positionWorld.add(reflectedDirection.mul(terrainReflection.x)).toVar(),reflectInfo=sampleBedInfo(sim,reflectPoint.xz);
  const reflectedTerrain=receiverAt(reflectPoint,reflectInfo.normal,reflectInfo.data,float(0));
  const reflectedSurface=Fn(()=>{const grid=reflectPoint.xz.add(16).div(sim.dx).sub(.5).clamp(0,sim.n-1),base=grid.floor().min(sim.n-2),f=grid.sub(base),i=uint(base.y.mul(sim.n).add(base.x));const a=sim.elevation(i),b=sim.elevation(i.add(1)),c=sim.elevation(i.add(sim.n)),d=sim.elevation(i.add(sim.n+1));return select(f.x.add(f.y).lessThanEqual(1),a.mul(float(1).sub(f.x).sub(f.y)).add(b.mul(f.x)).add(c.mul(f.y)),d.mul(f.x.add(f.y).sub(1)).add(c.mul(float(1).sub(f.x))).add(b.mul(float(1).sub(f.y))));})();
@@ -78,10 +76,10 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const reflectUV=reflectedHit.xy.clamp(.001,.999),reflectedObjectView=getViewPosition(reflectUV,waterDepthBuffer.sample(reflectUV),cameraProjectionMatrixInverse);
  const reflectionConfidence=reflectedHit.w.mul(select(length(reflectedObjectView.sub(bodyCenterView)).lessThan(sim.visualBody.w),float(1),float(0))).mul(smoothstep(.015,.10,reflectedDirection.y)).mul(float(1).sub(waterRoughness.mul(.8)));
  const reflectedColor=mix(mix(skyReflection,reflectedTerrain,terrainReflection.y.mul(reflectedDry).mul(smoothstep(.01,.08,reflectedDirection.y))),waterSceneBuffer.sample(reflectUV).rgb,reflectionConfidence);
- const softenedReflection=mix(reflectedColor,skyReflection,turbulence.mul(.45).add(.20));
+ const softenedReflection=mix(reflectedColor,skyReflection,turbulence.mul(.35));
  const waterColor=mix(mix(transmitted,vec3(.13,.32,.34),blurryFresh.mul(.45)),softenedReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade));
  const foamLight=max(dot(normal,sunDirection),0).mul(shade).mul(.70).add(.38);material.colorNode=mix(waterColor,vec3(.90,.97,.98).mul(foamLight),whitewater);
  material.opacityNode=smoothstep(.0015,.016,wetDepth).mul(smoothstep(.002,.024,contactThickness));material.alphaTest=.001;
  material.userData.shoreDebug={microNormal:normalize(vec3(micro.x,1,micro.y)).mul(.5).add(.5),roughness:vec3(waterRoughness),slopeVariance:vec3(slopeVariance.mul(50)),velocity:vec3(flow.mul(.15).add(.5),0),froude:vec3(length(flow).div(max(center.x,.025).mul(9.81).sqrt()).div(2)),wetDry:vec3(wetDepth.smoothstep(.001,.025)),foamSources:vec3(density.z),foamCharts:vec3(blend,chartA.w,chartB.w),foamDensity:vec3(density.xy,0),foamAged:vec3(aged),foamFresh:vec3(dense),foamCoverage:vec3(coverage),shoreCoverage:vec3(vertexWetDepth.greaterThan(.002).and(wetDepth.lessThan(.001)).select(1,0),wetDepth.smoothstep(.001,.04),0),submergedReflection:vec3(terrainReflection.y.mul(float(1).sub(reflectedDry)),terrainReflection.y.mul(reflectedDry),0),noMirror:mix(mix(transmitted,skyReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade)),vec3(.90,.97,.98).mul(shade.mul(.18).add(.82)),whitewater),fresnel:vec3(fres),macroNormal:normalize(macro).mul(.5).add(.5),foam:vec3(whitewater),path:vec3(opticalPath.div(3)),depth:vec3(wetDepth.div(3)),transmission:transmitted,refracted:refracted.rgb};
- return {material,mirror,active,foamAmount,detailScale};
+ return {material,mirror,active,foamAmount,detailScale,absorption,inscatter};
 }
