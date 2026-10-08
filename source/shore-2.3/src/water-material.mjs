@@ -19,15 +19,17 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const material=new THREE.MeshBasicNodeMaterial({transparent:true,side:THREE.DoubleSide,depthWrite:true});
  material.positionNode=vec3(positionLocal.x,sim.elevation(vertexIndex).add(.002),positionLocal.z);
  const macro=Fn(()=>{const ns=neighbors(),e=i=>sim.elevation(i);return vec3(e(ns[0]).sub(e(ns[1])).div(dx*2),1,e(ns[2]).sub(e(ns[3])).div(dx*2));})().toVertexStage();
- const windTexture=texture(createWindTexture()),foamTexture=texture(createFoamTexture());
- const p=positionWorld.xz,uvA=p.mul(.125).add(vec2(clock.mul(-.029),clock.mul(.006))),uvB=vec2(p.x.mul(.8).add(p.y.mul(.6)),p.x.mul(-.6).add(p.y.mul(.8))).mul(.188).add(vec2(clock.mul(-.022),clock.mul(-.013))).add(vec2(.31,.47));
- const detailA=windTexture.sample(uvA),detailB=windTexture.sample(uvB);
- const micro=detailA.rg.mul(.85).add(vec2(detailB.r.mul(.8).sub(detailB.g.mul(.6)),detailB.r.mul(.6).add(detailB.g.mul(.8))).mul(.60)).mul(smoothstep(.008,.12,wetDepth)).mul(float(.28).sub(turbulence.mul(.10))).mul(detailScale);
+ const foamTexture=texture(createFoamTexture()),p=positionWorld.xz,flowDetail=center.yz.div(max(center.x,.02)).toVertexStage();
+ const phase0=fract(clock.mul(.25)),phase1=fract(phase0.add(.5)),flowBlend=abs(phase0.mul(2).sub(1)),adv0=p.sub(flowDetail.mul(phase0.mul(4))),adv1=p.sub(flowDetail.mul(phase1.mul(4)));
+ const rotate=q=>vec2(q.x.mul(.8).add(q.y.mul(.6)),q.x.mul(-.6).add(q.y.mul(.8)));
+ const detailA=mix(sim.microSpectrum.textures[0].sample(adv0.div(1.73)),sim.microSpectrum.textures[0].sample(adv1.div(1.73)),flowBlend);
+ const detailB=mix(sim.microSpectrum.textures[1].sample(rotate(adv0).div(6.31)),sim.microSpectrum.textures[1].sample(rotate(adv1).div(6.31)),flowBlend);
+ const micro=detailA.rg.add(vec2(detailB.r.mul(.8).sub(detailB.g.mul(.6)),detailB.r.mul(.6).add(detailB.g.mul(.8)))).mul(smoothstep(.008,.12,wetDepth)).mul(turbulence.mul(.3).add(1)).mul(detailScale).mul(sim.microSpectrum.strength);
  const normal=normalize(vec3(macro.x.sub(micro.x),macro.y,macro.z.sub(micro.y)));
  const mirror=null;
  const view=normalize(cameraPosition.sub(positionWorld));
- const fineGain=float(.28).sub(turbulence.mul(.10)),slopeVariance=max(detailA.b.sub(dot(detailA.rg,detailA.rg)),0).mul(.7225).add(max(detailB.b.sub(dot(detailB.rg,detailB.rg)),0).mul(.36)).mul(fineGain.pow(2));
- const waterRoughness=pow(float(.22).add(turbulence.mul(.16)).pow(4).add(slopeVariance.mul(.65)).add(dot(fwidth(normal),fwidth(normal)).mul(.12)),.25).clamp(.22,.42);
+ const slopeVariance=max(detailA.b.sub(dot(detailA.rg,detailA.rg)),0).add(max(detailB.b.sub(dot(detailB.rg,detailB.rg)),0)).mul(detailScale.pow(2)).mul(sim.microSpectrum.strength.pow(2));
+ const waterRoughness=pow(float(.055).pow(4).add(slopeVariance.mul(.5)).add(dot(fwidth(normal),fwidth(normal)).mul(.08)),.25).clamp(.05,.38);
  const fres=environmentBRDF(max(dot(normal,view),.001),waterRoughness).clamp(0,1);
  const sceneDepth=waterDepthBuffer.sample(screenUV),behindZ=perspectiveDepthToViewZ(sceneDepth,cameraNear,cameraFar);
  const viewRayScale=length(positionView).div(max(positionView.z.negate(),.001)),opaquePath=max(positionView.z.sub(behindZ),0).mul(viewRayScale);
@@ -80,6 +82,6 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const waterColor=mix(mix(transmitted,vec3(.13,.32,.34),blurryFresh.mul(.45)),softenedReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade));
  const foamLight=max(dot(normal,sunDirection),0).mul(shade).mul(.70).add(.38);material.colorNode=mix(waterColor,vec3(.90,.97,.98).mul(foamLight),whitewater);
  material.opacityNode=smoothstep(.0015,.016,wetDepth).mul(smoothstep(.002,.024,contactThickness));material.alphaTest=.001;
- material.userData.shoreDebug={velocity:vec3(flow.mul(.15).add(.5),0),froude:vec3(length(flow).div(max(center.x,.025).mul(9.81).sqrt()).div(2)),wetDry:vec3(wetDepth.smoothstep(.001,.025)),foamSources:vec3(density.z),foamCharts:vec3(blend,chartA.w,chartB.w),foamDensity:vec3(density.xy,0),foamAged:vec3(aged),foamFresh:vec3(dense),foamCoverage:vec3(coverage),shoreCoverage:vec3(vertexWetDepth.greaterThan(.002).and(wetDepth.lessThan(.001)).select(1,0),wetDepth.smoothstep(.001,.04),0),submergedReflection:vec3(terrainReflection.y.mul(float(1).sub(reflectedDry)),terrainReflection.y.mul(reflectedDry),0),noMirror:mix(mix(transmitted,skyReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade)),vec3(.90,.97,.98).mul(shade.mul(.18).add(.82)),whitewater),fresnel:vec3(fres),macroNormal:normalize(macro).mul(.5).add(.5),foam:vec3(whitewater),path:vec3(opticalPath.div(3)),depth:vec3(wetDepth.div(3)),transmission:transmitted,refracted:refracted.rgb};
+ material.userData.shoreDebug={microNormal:normalize(vec3(micro.x,1,micro.y)).mul(.5).add(.5),roughness:vec3(waterRoughness),slopeVariance:vec3(slopeVariance.mul(50)),velocity:vec3(flow.mul(.15).add(.5),0),froude:vec3(length(flow).div(max(center.x,.025).mul(9.81).sqrt()).div(2)),wetDry:vec3(wetDepth.smoothstep(.001,.025)),foamSources:vec3(density.z),foamCharts:vec3(blend,chartA.w,chartB.w),foamDensity:vec3(density.xy,0),foamAged:vec3(aged),foamFresh:vec3(dense),foamCoverage:vec3(coverage),shoreCoverage:vec3(vertexWetDepth.greaterThan(.002).and(wetDepth.lessThan(.001)).select(1,0),wetDepth.smoothstep(.001,.04),0),submergedReflection:vec3(terrainReflection.y.mul(float(1).sub(reflectedDry)),terrainReflection.y.mul(reflectedDry),0),noMirror:mix(mix(transmitted,skyReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade)),vec3(.90,.97,.98).mul(shade.mul(.18).add(.82)),whitewater),fresnel:vec3(fres),macroNormal:normalize(macro).mul(.5).add(.5),foam:vec3(whitewater),path:vec3(opticalPath.div(3)),depth:vec3(wetDepth.div(3)),transmission:transmitted,refracted:refracted.rgb};
  return {material,mirror,active,foamAmount,detailScale};
 }
