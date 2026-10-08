@@ -5,6 +5,7 @@ import {createPlayerController} from './player-controller.mjs';
 import {terrain,shoreline,clamp} from './terrain.mjs';
 import {legacyHTML} from './legacy.mjs';
 const canvas=document.getElementById('view'),hud=document.getElementById('hud'),loading=document.getElementById('loading');
+const requestedPreset=typeof location==='undefined'?'':new URLSearchParams(location.search).get('preset'),mobilePreset=requestedPreset==='mobile'||(requestedPreset!=='high'&&/iPhone|iPad|Android/i.test(navigator.userAgent));
 let renderer,shore,device,stopped=false;
 const diagnostics={build:'shore-2.3-stage6',stage:'starting',firstError:null,errorType:null,samples:null,compatibility:null,viewport:null};window.shoreDiagnostics=diagnostics;
 function graphicsFailure(error,type='graphics-error'){if(!diagnostics.firstError){diagnostics.firstError=String(error?.message||error||'Unknown graphics error');diagnostics.errorType=error?.constructor?.name||type;diagnostics.failureStage=diagnostics.stage;}fallback(type==='device-lost'?'WebGPU-устройство потеряно.':'Ошибка WebGPU. Точная причина сохранена ниже.');}
@@ -16,10 +17,10 @@ async function boot(){
  const limits={};if('maxStorageBuffersInVertexStage' in adapter.limits){if(adapter.limits.maxStorageBuffersInVertexStage<3){fallback('Устройство не поддерживает нужный режим WebGPU.');return;}limits.maxStorageBuffersInVertexStage=3;}
  const features=adapter.features.has('core-features-and-limits')?['core-features-and-limits']:[];
  diagnostics.stage='device';device=await adapter.requestDevice({requiredLimits:limits,requiredFeatures:features});device.addEventListener("uncapturederror",e=>graphicsFailure(e.error,"gpu-validation"));
- renderer=new THREE.WebGPURenderer({canvas,device,antialias:true});renderer.onError=e=>graphicsFailure(e);renderer.onDeviceLost=e=>graphicsFailure(e,'device-lost');diagnostics.stage='renderer-init';await renderer.init();if(stopped)return;if(!renderer.backend.isWebGPUBackend)throw Error('WebGPU backend was not selected');
+ renderer=new THREE.WebGPURenderer({canvas,device,antialias:!mobilePreset});renderer.onError=e=>graphicsFailure(e);renderer.onDeviceLost=e=>graphicsFailure(e,'device-lost');diagnostics.stage='renderer-init';await renderer.init();if(stopped)return;if(!renderer.backend.isWebGPUBackend)throw Error('WebGPU backend was not selected');
  renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.90;
 
- let quality=1;function resize(){renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5)*quality);renderer.setSize(innerWidth,innerHeight,false);if(shore){shore.camera.aspect=innerWidth/innerHeight;shore.camera.updateProjectionMatrix();}}
+ let quality=1;function resize(){renderer.setPixelRatio(Math.min(devicePixelRatio||1,mobilePreset?1:1.5)*quality);renderer.setSize(innerWidth,innerHeight,false);if(shore){shore.camera.aspect=innerWidth/innerHeight;shore.camera.updateProjectionMatrix();}}
  resize();diagnostics.stage='scene-init';shore=await createShoreScene(renderer,{resolution:256});if(stopped)return;resize();bindShoreControls(shore);
  const controller=createPlayerController(shore),keys=new Set(),touch={x:0,y:0};let jump=false,paused=false,last=performance.now(),fps=60,elapsed=0;
  function reset(){shore.tracks.reset();shore.sim.reset();shore.setView('wide');controller.reset();keys.clear();document.getElementById('follow').checked=false;}
@@ -41,7 +42,7 @@ async function boot(){
   if(stopped)return;const now=performance.now(),raw=(now-last)/1000;last=now;const dt=Math.min(.033,Math.max(0,raw));if(document.hidden)return;
   if(!paused){const forward=(Number(keys.has('KeyW')||keys.has('ArrowUp'))-Number(keys.has('KeyS')||keys.has('ArrowDown')))+touch.y,right=(Number(keys.has('KeyD')||keys.has('ArrowRight'))-Number(keys.has('KeyA')||keys.has('ArrowLeft')))+touch.x;controller.step(dt,{forward,right,jump,run:keys.has('ShiftLeft')||keys.has('ShiftRight')});jump=false;}
 
-  shore.updateCamera();shore.syncCamera(canvas.height);shore.render();fps=fps*.96+Math.min(240,1/Math.max(raw,.001))*.04;elapsed+=dt;if(elapsed>.3){elapsed=0;hud.textContent=`Shore 2.3 · SWE · Альфред · WebGPU · ${paused?'пауза':Math.round(fps)+' fps'}\nWASD / стрелки — идти · пробел — прыжок\nМышь — камера · F — следовать · R — сброс`;}
+  shore.updateCamera();shore.syncCamera(canvas.height);shore.render();fps=fps*.96+Math.min(240,1/Math.max(raw,.001))*.04;elapsed+=dt;if(elapsed>.3){elapsed=0;hud.textContent=`Shore 2.3 · SWE · Альфред · WebGPU · ${paused?'пауза':Math.round(fps)+' fps'}\nСетка 256² · 12.5 см · пена ${shore.sim.foamField.resolution}²\nГлубина под игроком ${controller.diagnostics.water.h.toFixed(2)} м · погружение ${Math.round(controller.diagnostics.lastImmersion*100)}%\nWASD / стрелки — идти · пробел — прыжок\nМышь — камера · F — следовать · R — сброс`;}
  });
 }
 boot().catch(e=>{console.error(e);graphicsFailure(e,'startup-error');});

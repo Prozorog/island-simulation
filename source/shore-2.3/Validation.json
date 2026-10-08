@@ -1,0 +1,92 @@
+{
+  "status": "Experimental isolated candidate; visual target remains under review",
+  "physicalGrid": {
+    "resolution": 256,
+    "cellMetres": 0.125
+  },
+  "backendEvidence": "Native Dawn Vulkan SwiftShader; not hardware GPU FPS",
+  "hardwareFPSVerified": false,
+  "referenceParityClaimed": false,
+  "physics": [
+    {
+      "test": "lake-at-rest",
+      "initial": {
+        "mass": 477.4167749138404,
+        "minH": 0,
+        "maxH": 2.131214141845703,
+        "maxSpeed": 0,
+        "maxEta": 0,
+        "finite": true
+      },
+      "rest": {
+        "mass": 477.4167749138404,
+        "minH": 0,
+        "maxH": 2.131214141845703,
+        "maxSpeed": 2.8400821047893996e-06,
+        "maxEta": 0,
+        "finite": true
+      },
+      "relativeMassDrift": 0
+    },
+    {
+      "test": "impact-mass",
+      "impact": {
+        "mass": 477.38104921320405,
+        "minH": 0,
+        "maxH": 2.131214141845703,
+        "maxSpeed": 0.22035093178184686,
+        "maxEta": 0.02848469465970993,
+        "finite": true
+      },
+      "relativeMassDrift": 7.483126382144809e-05
+    },
+    {
+      "test": "ten-second-forcing-wet-dry",
+      "waves": {
+        "mass": 485.04589127253354,
+        "minH": 0,
+        "maxH": 2.2264597415924072,
+        "maxSpeed": 3.493631218247736,
+        "maxEta": 0.25468366779386997,
+        "finite": true
+      }
+    },
+    {
+      "test": "positivity-audit",
+      "clippedMass": 0
+    },
+    {
+      "test": "reset",
+      "state": {
+        "mass": 477.4167749138404,
+        "minH": 0,
+        "maxH": 2.131214141845703,
+        "maxSpeed": 0,
+        "maxEta": 0,
+        "finite": true
+      }
+    }
+  ],
+  "fallback": "Original WebGL2 V9 module byte-identical; absent-WebGPU routing test passed",
+  "ripple": {
+    "resolution": 512,
+    "finite": true,
+    "maxHeightMetres": 0.001690364326350391,
+    "maxVelocity": 0.006719420664012432,
+    "reset": "GPU clear verified"
+  },
+  "sampler": {
+    "outputLength": 8,
+    "restSurfaceContinuous": true,
+    "resetSurfaceVelocity": 0
+  },
+  "captureNotes": "Stage screenshots are software-rendered. Developed-wave video is recorded at24fps simulated time, not realtime.",
+  "finalFoamResidualCap": 0.45,
+  "finalMobileCapture": {
+    "warmupSeconds": 20,
+    "actualPixels": true,
+    "nativeBackend": "Dawn Vulkan SwiftShader",
+    "gpuValidationErrors": 0,
+    "multisampling": 0
+  }
+}

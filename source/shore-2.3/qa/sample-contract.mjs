@@ -14,8 +14,6 @@ renderer.setSize(256,256,false);await renderer.init();
 
 
 
-const {uniform}=await import('three/tsl');const {createLocalRipples}=await import('../src/local-ripples.mjs');
-const sim={time:uniform(0),body:uniform(new THREE.Vector4(-3,-2,0,.32)),bodyMotion:uniform(new THREE.Vector4(1,0,.7,0))};const ripple=createLocalRipples(renderer,sim,{resolution:512});
-for(let i=0;i<90;i++){sim.time.value+=1/60;sim.body.value.x+=1/60;ripple.step(1/60);if(i%5===4)await device.queue.onSubmittedWorkDone();}
-const read=await ripple.read();let maxHeight=0,maxVelocity=0;for(let i=0;i<read.length;i+=4){maxHeight=Math.max(maxHeight,Math.abs(read[i]));maxVelocity=Math.max(maxVelocity,Math.abs(read[i+1]));}
-if(!read.every(Number.isFinite)||maxHeight>=.075)throw Error('Ripple unstable');console.log(JSON.stringify({resolution:ripple.resolution,finite:true,maxHeight,maxVelocity,center:ripple.center.value.toArray()}));ripple.reset();const reset=await ripple.read();if(reset.some(x=>x!==0))throw Error('Reset failed');console.log('reset zero PASS');renderer.dispose();device.destroy();process.exit(0);
+const {createWaterCompute}=await import('../src/water-compute.mjs');const sim=await createWaterCompute(renderer,{quiet:true});
+const a=await sim.sample(-8.001,-3),b=await sim.sample(-7.999,-3);if(a.length!==8||!a.every(Number.isFinite)||Math.abs(a[4])>1e-5||Math.abs(a[0]-b[0])>1e-5)throw Error('Sampler contract failed '+JSON.stringify(Array.from(a)));
+sim.impact({position:{x:-8,z:-3},radius:.35,relativeSpeed:3});sim.step(.1);await device.queue.onSubmittedWorkDone();sim.reset();const reset=await sim.sample(-8,-3);if(Math.abs(reset[4])>1e-5)throw Error('Reset injected surface velocity');console.log(JSON.stringify({samplerLength:a.length,continuousRestSurface:true,resetRate:reset[4],finite:true}));renderer.dispose();device.destroy();process.exit(0);

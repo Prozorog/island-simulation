@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import {Fn,If,instanceIndex,uint,uvec2,vec2,vec4,float,uniform,texture,textureLoad,textureStore,min,max,mix,select,length,smoothstep} from 'three/tsl';
 // Two physical densities, limited MacCormack transport, and two independently renewed material charts.
 export function createFoamField(renderer,sim,{resolution=1024}={}){
- const n=resolution,dx=32/n,dt=uniform(1/60),active=uniform(0),freshLife=uniform(1.5),residualLife=uniform(30),strength=uniform(1),chartLife=uniform(2.4);
+ const n=resolution,dx=32/n,dt=uniform(1/60),active=uniform(0),freshLife=uniform(1.5),residualLife=uniform(30),residualCoverage=uniform(.45),strength=uniform(1),chartLife=uniform(2.4);
  const make=()=>{const t=new THREE.StorageTexture(n,n);t.type=THREE.HalfFloatType;t.generateMipmaps=false;return t;};
  const density=[make(),make()],predict=make(),charts=[[make(),make()],[make(),make()]];
  const at=(tex,p)=>textureLoad(tex,uvec2(p.clamp(0,n-1)));
@@ -26,7 +26,7 @@ export function createFoamField(renderer,sim,{resolution=1024}={}){
   const delta=w.sub(sim.body.xy),rim=length(delta).sub(sim.body.w).div(.17).pow(2).negate().exp(),body=rim.mul(length(sim.bodyMotion.xy.sub(v)).smoothstep(.15,1.7)).mul(sim.bodyMotion.z);
   const source=sim.wet.element(i).y.mul(2.8).add(shore.mul(2)).add(rock.mul(3)).add(body.mul(2)).mul(strength);
   const fresh=transported.x.mul(dt.div(freshLife).negate().exp()).add(float(1).sub(transported.x).mul(float(1).sub(source.mul(dt).negate().exp()))).clamp(0,1);
-  const residual=transported.y.mul(dt.div(residualLife).negate().exp()).add(float(1).sub(transported.y).mul(fresh.mul(dt).mul(.65))).clamp(0,1);
+  const residual=transported.y.mul(dt.div(residualLife).negate().exp()).add(max(residualCoverage.sub(transported.y),0).mul(fresh.mul(dt).mul(.4))).clamp(0,residualCoverage);
   const wet=smoothstep(.001,.008,s.x);textureStore(density[1-k],uvec2(g),vec4(fresh.mul(wet),residual.mul(wet),source.clamp(0,1),wet)).toWriteOnly();
  })().compute(n*n,[64]));
  const chartNodes=charts.map(pair=>pair.map((read,k)=>Fn(()=>{
@@ -36,8 +36,8 @@ export function createFoamField(renderer,sim,{resolution=1024}={}){
   const reset=age.greaterThanEqual(chartLife).or(stretch.greaterThan(4).and(fade.mul(quality).lessThan(.02)));
   textureStore(pair[1-k],uvec2(g),select(reset,vec4(w,0,0),vec4(old.xy,age,fade.mul(quality)))).toWriteOnly();
  })().compute(n*n,[64])));
- let parity=0;
+ let parity=0,accumulated=0;
  const displayDensity=texture(density[0]),displayCharts=charts.map(pair=>texture(pair[0]));const sync=()=>{displayDensity.value=density[parity];for(let j=0;j<2;j++)displayCharts[j].value=charts[j][parity];};
  renderer.compute(init);
- return {resolution:n,freshLife,residualLife,strength,chartLife,density:uv=>displayDensity.sample(uv),charts:displayCharts.map(node=>uv=>node.sample(uv)),step(seconds){dt.value=Math.min(seconds,.033);renderer.compute([advect[parity],correct[parity],chartNodes[0][parity],chartNodes[1][parity]]);parity=1-parity;active.value=parity;sync();},reset(){renderer.compute(init);parity=0;active.value=0;sync();},dispose(){for(const t of [...density,predict,...charts.flat()])t.dispose();}};
+ return {resolution:n,freshLife,residualLife,residualCoverage,strength,chartLife,density:uv=>displayDensity.sample(uv),charts:displayCharts.map(node=>uv=>node.sample(uv)),step(seconds){accumulated+=seconds;if(accumulated<1/30-1e-6)return;dt.value=Math.min(accumulated,.067);accumulated=0;renderer.compute([advect[parity],correct[parity],chartNodes[0][parity],chartNodes[1][parity]]);parity=1-parity;active.value=parity;sync();},reset(){renderer.compute(init);parity=0;accumulated=0;active.value=0;sync();},dispose(){for(const t of [...density,predict,...charts.flat()])t.dispose();}};
 }
