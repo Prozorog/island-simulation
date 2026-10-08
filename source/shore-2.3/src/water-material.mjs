@@ -59,15 +59,12 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const shade=shadowMask.rgb;
  const flow=center.yz.div(max(center.x,.02)).toVertexStage();
  const history=select(active.equal(0),sim.foamA.element(vertexIndex),sim.foamB.element(vertexIndex)).toVertexStage();
- const phase=float(.5),other=float(.5),q=history.xy;
- const pattern0=foamTexture.sample(q.mul(.34)),pattern1=pattern0;
- const relativeFlow=sim.bodyMotion.xy.sub(flow),relativeSpeed=length(relativeFlow),bodyFacing=max(dot(bodyDelta.div(max(bodyDistance,.001)),relativeFlow.div(max(relativeSpeed,.001))),0).mul(.7).add(.3);
- const bodyRim=exp(pow(bodyDistance.sub(bodyRadius.mul(1.12)).div(bodyRadius.mul(.12).add(.09)),2).negate()).mul(smoothstep(.15,1.2,relativeSpeed)).mul(sim.bodyMotion.z).mul(bodyFacing);
- const coverage=smoothstep(.012,.30,foamCoverage),fresh=max(turbulence,bodyRim.mul(.90));
- const foamDetail=pattern=>{const rafts=smoothstep(float(.34).add(smoothstep(.5,3,history.z).mul(.045)),float(.65).add(smoothstep(.5,3,history.z).mul(.025)),pattern.b.add(coverage.mul(.07)));return pattern.r.mul(rafts).mul(pattern.g.mul(.30).add(.70)).add(pattern.g.mul(.045).mul(rafts));};
- const blend=float(0),aged=mix(foamDetail(pattern0),foamDetail(pattern1),blend).mul(coverage).mul(1.25);
- const aerated=pattern=>fresh.mul(smoothstep(.25,.66,pattern.b)).mul(pow(pattern.g,.6).mul(.72).add(.28));
- const dense=mix(aerated(pattern0),aerated(pattern1),blend).mul(1.25),foamMask=max(aged,dense);
+ const foamUV=positionWorld.xz.add(16).div(32),density=sim.foamField.density(foamUV),chartA=sim.foamField.charts[0](foamUV),chartB=sim.foamField.charts[1](foamUV);
+ const sumWeights=chartA.w.add(chartB.w).max(.001),blend=chartB.w.div(sumWeights),pattern0=foamTexture.sample(chartA.xy.mul(.34)),pattern1=foamTexture.sample(chartB.xy.mul(.34));
+ const cellular=(pattern,amount)=>{const value=pattern.r.mul(.76).add(pattern.g.mul(.24)),threshold=float(1.02).sub(amount.sqrt().mul(1.2)),aa=max(fwidth(value),.015);return smoothstep(threshold.sub(aa),threshold.add(aa),value);};
+ const coverage=density.y, fresh=density.x;
+ const aged=mix(cellular(pattern0,coverage),cellular(pattern1,coverage),blend),dense=mix(cellular(pattern0,fresh),cellular(pattern1,fresh),blend),foamMask=max(aged,dense);
+ const blurryFresh=density.x.add(sim.foamField.density(foamUV.add(vec2(.002,0))).x).add(sim.foamField.density(foamUV.sub(vec2(.002,0))).x).add(sim.foamField.density(foamUV.add(vec2(0,.002))).x).add(sim.foamField.density(foamUV.sub(vec2(0,.002))).x).mul(.2);
  const whitewater=foamMask.mul(foamAmount).mul(smoothstep(.008,.045,wetDepth)).mul(float(1).sub(smoothstep(.10,.55,centerBed.z.toVertexStage()).mul(float(1).sub(smoothstep(.12,.35,wetDepth))))).clamp(0,.98);
  const reflectedDirection=reflect(view.negate(),normal),skyHeight=reflectedDirection.y.clamp(0,1),skyReflection=vec3(.43,.56,.66).sub(vec3(.25,.28,.26).mul(skyHeight)).mul(.55);
  const terrainReflection=reflectedBedHit(sim,positionWorld,reflectedDirection).toVar(),reflectPoint=positionWorld.add(reflectedDirection.mul(terrainReflection.x)).toVar(),reflectInfo=sampleBedInfo(sim,reflectPoint.xz);
@@ -80,9 +77,9 @@ export function createWaterMaterial(sim,sun,shadowMask,receiverAt){
  const reflectionConfidence=reflectedHit.w.mul(select(length(reflectedObjectView.sub(bodyCenterView)).lessThan(sim.visualBody.w),float(1),float(0))).mul(smoothstep(.015,.10,reflectedDirection.y)).mul(float(1).sub(waterRoughness.mul(.8)));
  const reflectedColor=mix(mix(skyReflection,reflectedTerrain,terrainReflection.y.mul(reflectedDry).mul(smoothstep(.01,.08,reflectedDirection.y))),waterSceneBuffer.sample(reflectUV).rgb,reflectionConfidence);
  const softenedReflection=mix(reflectedColor,skyReflection,turbulence.mul(.45).add(.20));
- const waterColor=mix(transmitted,softenedReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade));
- material.colorNode=mix(waterColor,vec3(.90,.97,.98).mul(shade.mul(.18).add(.82)),whitewater);
+ const waterColor=mix(mix(transmitted,vec3(.13,.32,.34),blurryFresh.mul(.45)),softenedReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade));
+ const foamLight=max(dot(normal,sunDirection),0).mul(shade).mul(.70).add(.38);material.colorNode=mix(waterColor,vec3(.90,.97,.98).mul(foamLight),whitewater);
  material.opacityNode=smoothstep(.0015,.016,wetDepth).mul(smoothstep(.002,.024,contactThickness));material.alphaTest=.001;
- material.userData.shoreDebug={foamAged:vec3(aged),foamFresh:vec3(dense),foamCoverage:vec3(coverage),shoreCoverage:vec3(vertexWetDepth.greaterThan(.002).and(wetDepth.lessThan(.001)).select(1,0),wetDepth.smoothstep(.001,.04),0),submergedReflection:vec3(terrainReflection.y.mul(float(1).sub(reflectedDry)),terrainReflection.y.mul(reflectedDry),0),noMirror:mix(mix(transmitted,skyReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade)),vec3(.90,.97,.98).mul(shade.mul(.18).add(.82)),whitewater),fresnel:vec3(fres),macroNormal:normalize(macro).mul(.5).add(.5),foam:vec3(whitewater),path:vec3(opticalPath.div(3)),depth:vec3(wetDepth.div(3)),transmission:transmitted,refracted:refracted.rgb};
+ material.userData.shoreDebug={velocity:vec3(flow.mul(.15).add(.5),0),froude:vec3(length(flow).div(max(center.x,.025).mul(9.81).sqrt()).div(2)),wetDry:vec3(wetDepth.smoothstep(.001,.025)),foamSources:vec3(density.z),foamCharts:vec3(blend,chartA.w,chartB.w),foamDensity:vec3(density.xy,0),foamAged:vec3(aged),foamFresh:vec3(dense),foamCoverage:vec3(coverage),shoreCoverage:vec3(vertexWetDepth.greaterThan(.002).and(wetDepth.lessThan(.001)).select(1,0),wetDepth.smoothstep(.001,.04),0),submergedReflection:vec3(terrainReflection.y.mul(float(1).sub(reflectedDry)),terrainReflection.y.mul(reflectedDry),0),noMirror:mix(mix(transmitted,skyReflection,fres).add(vec3(1.3,1.17,.94).mul(highlight).mul(shade)),vec3(.90,.97,.98).mul(shade.mul(.18).add(.82)),whitewater),fresnel:vec3(fres),macroNormal:normalize(macro).mul(.5).add(.5),foam:vec3(whitewater),path:vec3(opticalPath.div(3)),depth:vec3(wetDepth.div(3)),transmission:transmitted,refracted:refracted.rgb};
  return {material,mirror,active,foamAmount,detailScale};
 }
