@@ -1,0 +1,1 @@
+{"name":"shore-water-webgpu","private":true,"type":"module","scripts":{"build":"node build.mjs"},"dependencies":{"esbuild":"0.25.12","pngjs":"7.0.0","three":"0.186.1","webgpu":"0.6.2"}}

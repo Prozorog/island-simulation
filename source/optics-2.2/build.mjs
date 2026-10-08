@@ -1,0 +1,3 @@
+import {build} from 'esbuild';import fs from 'node:fs';
+const result=await build({entryPoints:['src/app.mjs'],bundle:true,write:false,format:'iife',target:'es2022',minify:true,legalComments:'inline'});
+let code=result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script');const html=fs.readFileSync('index.template.html','utf8').replace('/*__APP__*/',()=>code);if(html.match(/<script>([\s\S]*)<\/script>/)?.[1]!==code)throw Error('HTML embedding changed bundled JavaScript');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/index.html',html);console.log('Bundled self-contained WebGPU HTML:',Buffer.byteLength(html),'bytes');
