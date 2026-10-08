@@ -1,11 +1,12 @@
 import * as THREE from 'three/webgpu';
+import {bindShoreControls} from './shore-controls.mjs';
 import {createShoreScene} from './scene.mjs';
 import {createPlayerController} from './player-controller.mjs';
 import {terrain,shoreline,clamp} from './terrain.mjs';
 import {legacyHTML} from './legacy.mjs';
 const canvas=document.getElementById('view'),hud=document.getElementById('hud'),loading=document.getElementById('loading');
 let renderer,shore,device,stopped=false;
-const diagnostics={build:'shore-2.3-stage5',stage:'starting',firstError:null,errorType:null,samples:null,compatibility:null,viewport:null};window.shoreDiagnostics=diagnostics;
+const diagnostics={build:'shore-2.3-stage6',stage:'starting',firstError:null,errorType:null,samples:null,compatibility:null,viewport:null};window.shoreDiagnostics=diagnostics;
 function graphicsFailure(error,type='graphics-error'){if(!diagnostics.firstError){diagnostics.firstError=String(error?.message||error||'Unknown graphics error');diagnostics.errorType=error?.constructor?.name||type;diagnostics.failureStage=diagnostics.stage;}fallback(type==='device-lost'?'WebGPU-устройство потеряно.':'Ошибка WebGPU. Точная причина сохранена ниже.');}
 
 function fallback(reason){if(stopped)return;stopped=true;diagnostics.samples=renderer?.samples??null;diagnostics.compatibility=renderer?.backend?.compatibilityMode??null;diagnostics.viewport=[canvas.width||0,canvas.height||0];try{renderer?.setAnimationLoop(null);renderer?.dispose();device?.destroy();}catch(error){console.warn(error);}loading.hidden=true;document.getElementById('menu').hidden=true;document.getElementById('stick').style.display='none';document.getElementById('jump').style.display='none';canvas.hidden=true;const frame=document.getElementById('legacy');frame.srcdoc=legacyHTML;frame.style.display='block';const message=document.getElementById('fallback');message.hidden=false;message.textContent='Открыта совместимая версия V9 · WebGL2. '+reason;hud.hidden=true;window.shoreBackend={backend:'webgl2-fallback',reason};const details=document.getElementById('graphicsDetails');if(diagnostics.firstError){details.hidden=false;document.getElementById('graphicsError').textContent=diagnostics.build+' · этап: '+diagnostics.failureStage+'\n'+diagnostics.errorType+': '+diagnostics.firstError;document.getElementById('copyDiagnostics').onclick=()=>navigator.clipboard?.writeText(JSON.stringify(diagnostics,null,2)).catch(console.warn);}}
@@ -19,7 +20,7 @@ async function boot(){
  renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.90;
 
  let quality=1;function resize(){renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.5)*quality);renderer.setSize(innerWidth,innerHeight,false);if(shore){shore.camera.aspect=innerWidth/innerHeight;shore.camera.updateProjectionMatrix();}}
- resize();diagnostics.stage='scene-init';shore=await createShoreScene(renderer,{resolution:256});if(stopped)return;resize();
+ resize();diagnostics.stage='scene-init';shore=await createShoreScene(renderer,{resolution:256});if(stopped)return;resize();bindShoreControls(shore);
  const controller=createPlayerController(shore),keys=new Set(),touch={x:0,y:0};let jump=false,paused=false,last=performance.now(),fps=60,elapsed=0;
  function reset(){shore.tracks.reset();shore.sim.reset();shore.setView('wide');controller.reset();keys.clear();document.getElementById('follow').checked=false;}
 

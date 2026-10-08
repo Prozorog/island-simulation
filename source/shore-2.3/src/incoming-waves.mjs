@@ -4,7 +4,7 @@ const G=9.81,referenceSpeed=Math.sqrt(G*2);
 const ratios=[.68,.81,.93,1.00,1.11,1.27,1.49,1.83];
 const weights=ratios.map(r=>Math.pow(r,-5)*Math.exp(-1.25*Math.pow(r,-4))*Math.pow(3.3,Math.exp(-.5*((r-1)/(r<1?.07:.09))**2)));
 const norm=Math.sqrt(weights.reduce((a,b)=>a+b,0)/2);
-export const wavePackets=ratios.map((r,i)=>{const period=5/r,angle=Math.sin(i*2.39996)*.349,omega=2*Math.PI/period;return {amplitude:.42/4*Math.sqrt(weights[i])/norm,period,angle,center:0,width:100,beat:.071+i*.00913,groupPhase:i*2.39996323,phase:i*4.763932,omega,ky:omega*Math.sin(angle)/referenceSpeed};});
+export const wavePackets=ratios.map((r,i)=>{const period=5/r,angle=Math.sin(i*2.39996)*.349,omega=2*Math.PI/period;return {amplitude:.42/4*Math.sqrt(weights[i])/(norm*Math.sqrt(.65*.65+.35*.35/2)),period,angle,center:0,width:100,beat:.27+i*.00913,groupPhase:i*.13,phase:i*4.763932,omega,ky:omega*Math.sin(angle)/referenceSpeed};});
 const smooth=(a,b,x)=>{const f=Math.max(0,Math.min(1,(x-a)/(b-a)));return f*f*(3-2*f)};
 export function packetKx(packet,depth){const k=packet.omega/Math.sqrt(G*Math.max(depth,.25));return Math.sqrt(Math.max(k*k-packet.ky*packet.ky,.0001));}
 function envelope(p,z,t){return p.amplitude*(.18+.82*Math.exp(-.5*((z-p.center)/p.width)**2))*(.65+.35*Math.cos(p.beat*t+p.groupPhase));}

@@ -45,7 +45,7 @@ export function createGrass(sim,shadowMask){
  const leafNormal=normalize(bladeNormal(bladeCoord,root,shape,traits,motion,clock).toVertexStage()).mul(faceDirection),sunDirection=vec3(-.48,.84,-.42).normalize(),nl=max(dot(leafNormal,sunDirection),0),shade=shadowMask.rgb;
  const light=vec3(.38,.44,.34).add(vec3(.98,.88,.68).mul(nl.mul(.8).add(.2)).mul(shade));
  const back=pow(max(dot(normalize(cameraPosition.sub(positionWorld)).negate(),sunDirection),0),3),transmitted=max(dot(leafNormal,sunDirection).negate(),0).mul(back.mul(.65).add(.35)).mul(float(1).sub(dry.mul(.65)));
- material.fragmentNode=vec4(base.mul(light).mul(float(.66).add(smoothstep(.02,.62,bladeCoord.y).mul(.34)).toVertexStage()).add(base.mul(vec3(.85,1.05,.35)).mul(transmitted).mul(.38).mul(shade)),coverage);
+ material.outputNode=vec4(base.mul(light).mul(float(.66).add(smoothstep(.02,.62,bladeCoord.y).mul(.34)).toVertexStage()).add(base.mul(vec3(.85,1.05,.35)).mul(transmitted).mul(.38).mul(shade)),coverage);
 
  const meshes=[];
  for(let patch=0;patch<patches.length;patch++){
